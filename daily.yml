@@ -1,0 +1,58 @@
+name: Daily SOG board
+
+on:
+  schedule:
+    - cron: "0 15 * * *"    # ~11 AM Eastern: first board of the day
+    - cron: "30 21 * * *"   # ~5:30 PM Eastern: refresh lines and lineups before puck drop
+  workflow_dispatch:         # "Run workflow" button for a manual refresh
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: sog-board
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Restore finished-game cache
+        uses: actions/cache@v4
+        with:
+          path: .cache
+          key: nhl-cache-${{ github.run_id }}
+          restore-keys: nhl-cache-
+
+      - run: pip install -r requirements.txt
+
+      - name: Build today's board
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        run: python sog_board.py
+
+      - name: Save picks and archive
+        run: |
+          git config user.name "sog-board-bot"
+          git config user.email "sog-board-bot@users.noreply.github.com"
+          git add data site
+          git commit -m "Board for $(TZ=America/Toronto date +%F)" || echo "No changes"
+          git push
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v4
